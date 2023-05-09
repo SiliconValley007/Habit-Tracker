@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:habit_tracker/widgets/add_new_habit_dialog.dart';
-import 'package:habit_tracker/widgets/habit_tile.dart';
+import 'package:habit_tracker/constants/date_time.dart';
+import 'package:habit_tracker/widgets/monthly_summary.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../constants/constants.dart';
+import '../database/habit_database.dart';
 import '../models/habit.dart';
+import '../widgets/add_new_habit_dialog.dart';
+import '../widgets/habit_tile.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,83 +16,44 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Habit> habitList = [
-    const Habit(habitName: 'Drink Water'),
-    const Habit(habitName: 'Run'),
-    const Habit(habitName: 'Bathe'),
-  ];
+  HabitDatabase db = HabitDatabase();
+  late final Box<Habit> myBox;
+  late final Box<String> dateBox;
 
-  void addHabitToList(String habitName) {
-    final Habit habit = Habit(
-      habitName: habitName,
-      habitValue: false,
-    );
-    if (habitList.contains(habit)) return;
-    setState(() {
-      habitList.add(habit);
-    });
-  }
-
-  void removeHabitFromList(Habit habit) {
-    if (!habitList.contains(habit)) return;
-    setState(() {
-      habitList.remove(habit);
-    });
-  }
-
-  void removeHabitFromListUsingIndex(int index) {
-    setState(() {
-      habitList.removeAt(index);
-    });
+  @override
+  void initState() {
+    super.initState();
+    db.loadData();
+    myBox = Hive.box<Habit>(boxName);
+    dateBox = Hive.box<String>(dateBoxName);
+    if (dateBox.get(startDate) == null) {
+      dateBox.put(startDate, todaysDateFormatted());
+    }
   }
 
   void createNewHabit() => showDialog(
         context: context,
         builder: (context) => AddNewHabitDialog(
-          onSavePressed: addHabitToList,
+          onSavePressed: (value) => db.saveHabit(Habit(habitName: value)),
         ),
       );
 
-  void checkBoxTapped({required int index}) {
-    final Habit habitToBeUpdated = habitList.removeAt(index);
-    setState(() {
-      habitList.insert(
-        index,
-        Habit(
-          habitName: habitToBeUpdated.habitName,
-          habitValue: !habitToBeUpdated.habitValue,
-        ),
-      );
-    });
-  }
-
-  void onUpdatePressed(int index) {
-    final Habit habit = habitList[index];
+  void onUpdatePressed(int key, Habit habit) {
     showDialog(
       context: context,
       builder: (context) => AddNewHabitDialog(
         initialText: habit.habitName,
         onSavePressed: (newName) {
-          updateHabit(
-            index: index,
-            newHabitName: newName,
+          db.updateHabit(
+            key,
+            Habit(
+              habitName: newName,
+              habitValue: habit.habitValue,
+            ),
           );
         },
       ),
     );
-  }
-
-  void updateHabit({required int index, required String newHabitName}) {
-    final Habit habitToBeUpdated = habitList.removeAt(index);
-    setState(() {
-      habitList.insert(
-        index,
-        Habit(
-          habitName: newHabitName,
-          habitValue: habitToBeUpdated.habitValue,
-        ),
-      );
-    });
   }
 
   @override
@@ -95,25 +61,54 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: Colors.grey.shade300,
       body: SafeArea(
-        child: ListView.separated(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 24,
-            ),
-            itemCount: habitList.length,
-            separatorBuilder: (context, index) => const SizedBox(
-                  height: 12,
+        child: ValueListenableBuilder<Box<Habit>>(
+          valueListenable: myBox.listenable(),
+          builder: (context, items, child) {
+            final List<int> keys = items.keys.cast<int>().toList();
+            if (keys.isEmpty) {
+              return const Center(
+                child: Text(
+                  'Please Mention your habits',
+                  textAlign: TextAlign.center,
                 ),
-            itemBuilder: (context, index) {
-              final Habit habit = habitList[index];
-              return HabitTile(
-                habitName: habit.habitName,
-                habitCompleted: habit.habitValue,
-                onChanged: (_) => checkBoxTapped(index: index),
-                onEditTapped: (_) => onUpdatePressed(index),
-                onDeleteTapped: (_) => removeHabitFromListUsingIndex(index),
               );
-            }),
+            }
+            return Column(
+              children: [
+                MonthlySummary(
+                  startDate: dateBox.get(startDate) ?? todaysDateFormatted(),
+                  datasets: db.refreshHeatMap(),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 24,
+                    ),
+                    itemCount: keys.length,
+                    separatorBuilder: (context, index) => const SizedBox(
+                      height: 12,
+                    ),
+                    itemBuilder: (context, index) {
+                      final int key = keys[index];
+                      final Habit? habit = items.get(key);
+                      if (habit == null) {
+                        return const SizedBox.shrink();
+                      }
+                      return HabitTile(
+                        habitName: habit.habitName,
+                        habitCompleted: habit.habitValue,
+                        onChanged: (_) => db.updateHabitValue(key),
+                        onEditTapped: (_) => onUpdatePressed(key, habit),
+                        onDeleteTapped: (_) => db.deleteHabit(key),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: createNewHabit,

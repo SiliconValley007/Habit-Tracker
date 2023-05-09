@@ -1,5 +1,12 @@
+import 'package:hive_flutter/hive_flutter.dart';
+
+part 'habit.g.dart';
+
+@HiveType(typeId: 0)
 class Habit {
+  @HiveField(0)
   final String habitName;
+  @HiveField(1)
   final bool habitValue;
 
   const Habit({
